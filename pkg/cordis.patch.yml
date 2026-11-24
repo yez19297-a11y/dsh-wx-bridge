@@ -1,0 +1,7 @@
+# dsh-wx-bridge —— DSH bundle patch（`dsh plugin add` 时自动挂上）
+#
+# 只做一件事：装上插件本体。
+# 它自己会在 DSH 启动时把微信中继带起来，再把家里的话抄一份推到微信。
+- insert:
+    - id: dsh-wx-bridge
+      name: dsh-wx-bridge

@@ -1,0 +1,33 @@
+{
+  "name": "dsh-wx-bridge",
+  "version": "0.1.0",
+  "description": "把个人微信接到 DSH：你在微信里说的话进到家里，她在家里说的话（连闹钟叫醒时嘟囔的那句）抄一份回到微信。装完自动把中继带起来。",
+  "license": "MIT",
+  "type": "module",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20",
+    "dsh": ">=0.2.1-rc.2"
+  },
+  "keywords": [
+    "dsh",
+    "wechat",
+    "bridge",
+    "plugin"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}
