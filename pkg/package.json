@@ -1,17 +1,18 @@
 {
   "name": "dsh-wx-bridge",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "把个人微信接到 DSH：一条链接装好，中继和插件都在这一个包里。",
   "license": "MIT",
   "type": "module",
   "main": "./lib/index.js",
   "exports": {
     ".": "./lib/index.js",
-    "./client": "./lib/client.js",
+    "./client": "./client.js",
     "./package.json": "./package.json"
   },
   "files": [
     "lib",
+    "client.js",
     "relay",
     "cordis.patch.yml",
     "README.md",
