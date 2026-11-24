@@ -15,18 +15,23 @@ dsh plugin --profile web add https://github.com/yez19297-a11y/dsh-wx-bridge/rele
 
 装完**重启一次 DSH**。
 
-## 装完要配的（两样）
+## 装完要配的
 
-| 变量 | 默认 | 说明 |
+装好之后到 **DSH → 设置 → 插件 → 配置 → dsh-wx-bridge** 里填：
+
+| 设置项 | 默认 | 说明 |
 |---|---|---|
-| `WX_HOME_SESSION` | 空 | **必填**。你和她聊天那条会话 id 里的一段（`session-xxxxxxxx-…` 里那串）。不填，镜像不会生效 |
-| `WX_BRIDGE_DIR` | `~/.dsh/wx-bridge` | 中继的工作目录：登录态、队列、二维码、收到的图都在这儿 |
-| `WX_BRIDGE_URL` | `http://127.0.0.1:18123` | 中继地址 |
-| `WX_BRIDGE_PORT` | `18123` | 中继端口 |
-| `WX_NAME` | `她` | 推到微信时带的名字 |
-| `WX_KEEPALIVE_MS` | `30000` | 多久探一次中继 |
+| 你和她聊天的会话 | 空 | **必填**。会话 id 里的一段（`session-xxxxxxxx-…` 里那串）。不填，家里说的话不会抄到微信 |
+| 中继工作目录 | `~/.dsh/wx-bridge` | 登录态、发不出去的队列、二维码、收到的图都在这儿 |
+| 中继地址 | `http://127.0.0.1:18123` | 中继在哪 |
+| 中继端口 | `18123` | 只绑 `127.0.0.1` |
+| 推送名字 | `她` | 推到微信时带的名字 |
+| 保活间隔 | `30000` | 多久探一次中继（毫秒） |
+| 启动时自动拉起中继 | 开 | 关掉 = 你自己起 |
 
-`WX_HOME_SESSION` 怎么找：在 DSH 里正常跟她聊两句，看会话 id，取中间那串十六进制。
+这些也都认环境变量（`WX_HOME_SESSION`、`WX_BRIDGE_DIR`、`WX_BRIDGE_URL`、`WX_BRIDGE_PORT`、`WX_NAME`、`WX_KEEPALIVE_MS`），设置页里填的值优先。
+
+「你和她聊天的会话」怎么找：在 DSH 里正常跟她聊两句，看会话 id，取中间那串十六进制。
 
 ## 第一次：扫码登录
 
