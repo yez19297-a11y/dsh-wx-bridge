@@ -17,7 +17,8 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 export const name = 'dsh-wx-bridge'
-export const inject = []
+// 设置页那半要用宿主的 webServer 挂 /api/wx-bridge
+export const inject = ['webServer']
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const RELAY = join(HERE, '..', 'relay', 'wx-bridge.mjs')
@@ -157,9 +158,8 @@ async function ensureRelay(ctx) {
 function registerRoute(ctx) {
   let web
   try {
-    web = ctx.get ? ctx.get('webServer') : undefined
+    web = ctx.webServer
   } catch {}
-  web = web || ctx.webServer
   if (!web || typeof web.register !== 'function') {
     ctx.logger?.warn?.('dsh-wx-bridge: 这个宿主没有 webServer，设置页那半开不了（镜像照常工作）')
     return
