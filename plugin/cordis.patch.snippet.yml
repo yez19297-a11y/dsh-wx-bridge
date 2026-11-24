@@ -1,0 +1,18 @@
+# 把下面这段 append 到 DSH profile 的 cordis.patch.yml
+# 路径改成你把 wx-mirror.mjs 放在哪
+- insert:
+    - id: wx-mirror
+      name: /absolute/path/to/wx-mirror.mjs
+
+# 另外让 dsh-world 的回复推到中继（同一个文件）
+- id: dsh-world
+  name: dsh-world
+  config:
+    bridge: true
+    outlets:
+      - name: 微信桥
+        url: http://127.0.0.1:18123/push
+        kinds:
+          - reply
+          - busy
+          - reach

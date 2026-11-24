@@ -1,0 +1,8 @@
+node_modules/
+wx-state.json
+qr/
+media/
+outbox.jsonl
+*.log
+*.bak*
+.DS_Store

@@ -1,0 +1,20 @@
+{
+  "name": "dsh-wechat-bridge",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "description": "个人微信 ↔ DSH 的中继：让微信变成你养的那个数字生命的第二扇门",
+  "license": "MIT",
+  "keywords": [
+    "dsh",
+    "wechat",
+    "bridge",
+    "agent"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node src/wx-bridge.mjs"
+  }
+}
