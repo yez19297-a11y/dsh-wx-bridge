@@ -14,7 +14,7 @@ import { join, dirname } from 'node:path'
 import { WeixinOC } from './weixin-oc.mjs'
 
 const WORLD = process.env.WORLD_DIR || '/root/.dsh/worlds/default'
-const DIR = join(WORLD, 'room', 'wx-bridge')
+const DIR = process.env.WX_BRIDGE_DIR || join(WORLD, 'room', 'wx-bridge')
 const BRIDGE_FILE = join(WORLD, 'bridge.json')
 const OUTBOX = join(DIR, 'outbox.jsonl')
 const SEEN = join(DIR, 'seen.json')

@@ -1,33 +1,37 @@
 // dsh-wx-bridge · DSH 插件
 //
 // 两件事：
-//   1. 把微信和家里接起来。微信进来的一句送进会话（走 dsh-world 的 bridge）；
-//      家里说出去的每一句抄一份推到中继，由中继发到微信。
-//   2. DSH 启动时顺手把中继带起来——不这么做，机器重启一次微信那头就静悄悄地断了。
+//   1. 把家里的话抄一份推到微信（中继的 /push）。
+//   2. 中继自己也归它管：DSH 一启动就把它拉起来，之后每 30 秒探一次，
+//      挂了就重拉——不这么做，机器重启一次微信那头就静悄悄地断了。
 //
-// 中继本体在 src/wx-bridge.mjs（这个包的兄弟仓库），靠环境变量找：
-//   WX_BRIDGE_URL      中继地址，默认 http://127.0.0.1:18123
-//   WX_BRIDGE_DIR      中继工作目录，里面有 wx-bridge.mjs 和看到的登录态
-//   WX_HOME_SESSION    你和她聊天那条会话 id 里的一段（不填就镜像不到）
-//   WX_NAME            往微信推的时候带的名字，默认「她」
+// 中继源码就在本包的 relay/ 目录里，不用另装。
 
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { homedir } from 'node:os'
+import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 export const name = 'dsh-wx-bridge'
 export const inject = []
 
+const HERE = dirname(fileURLToPath(import.meta.url))
+const RELAY = join(HERE, '..', 'relay', 'wx-bridge.mjs')
+
 const BRIDGE = process.env.WX_BRIDGE_URL || 'http://127.0.0.1:18123'
-const WX_DIR = process.env.WX_BRIDGE_DIR || join(process.env.HOME || '/root', '.dsh/worlds/default/room/wx-bridge')
+// 中继的工作目录：登录态、队列、二维码、收到的图都在这儿。
+// 默认放在 ~/.dsh/wx-bridge，不跟任何房间目录搅在一起。
+const WX_DIR = process.env.WX_BRIDGE_DIR || join(homedir(), '.dsh', 'wx-bridge')
 const HOME_SESSION = process.env.WX_HOME_SESSION || ''
 const WX_NAME = process.env.WX_NAME || '她'
+const KEEPALIVE_MS = Number(process.env.WX_KEEPALIVE_MS || 30000)
 
 function short(e) {
   return String((e && e.message) || e || '').slice(0, 120)
 }
 
-async function bridgeAlive(timeout = 2500) {
+async function relayAlive(timeout = 2500) {
   try {
     const r = await fetch(BRIDGE + '/health', { signal: AbortSignal.timeout(timeout) })
     return r.ok
@@ -36,28 +40,34 @@ async function bridgeAlive(timeout = 2500) {
   }
 }
 
-// DSH 一启动就把中继也带起来：没在跑就把看门狗放出去。
-// 看门狗会一直看着它，杀了重拉，比在这里起一个裸进程稳。
-async function ensureBridge(ctx) {
-  if (await bridgeAlive()) {
-    ctx.logger?.info?.('dsh-wx-bridge: 中继本来就在跑')
-    return
-  }
-  const watchdog = process.env.WX_WATCHDOG || join(WX_DIR, 'watchdog.mjs')
-  if (!existsSync(watchdog)) {
-    ctx.logger?.warn?.(`dsh-wx-bridge: 中继没在跑，也没找到看门狗（${watchdog}）。` +
-      '把 WX_BRIDGE_DIR 指到中继的目录，或者手动起一下 src/wx-bridge.mjs。')
+/** 中继没在跑就把拉起来（不覆盖用户自己起的那个）。 */
+function startRelay(ctx) {
+  if (!existsSync(RELAY)) {
+    ctx.logger?.warn?.(`dsh-wx-bridge: 包里没找到中继（${RELAY}）`)
     return
   }
   try {
-    spawn(process.execPath, [watchdog], { detached: true, stdio: 'ignore' }).unref()
-    ctx.logger?.info?.('dsh-wx-bridge: 中继没在跑，已经把看门狗放出去了')
+    const child = spawn(process.execPath, [RELAY], {
+      detached: true,
+      stdio: 'ignore',
+      env: { ...process.env, WX_BRIDGE_DIR: WX_DIR },
+    })
+    child.unref()
+    ctx.logger?.info?.(`dsh-wx-bridge: 中继没在跑，拉起来了（pid ${child.pid}），数据在 ${WX_DIR}`)
   } catch (e) {
-    ctx.logger?.warn?.('dsh-wx-bridge: 看门狗放不出去：' + short(e))
+    ctx.logger?.warn?.('dsh-wx-bridge: 中继拉不起来：' + short(e))
   }
 }
 
-/** 把一句话推到微信。中继会把推送排队，微信那边掉线也不丢。 */
+async function ensureRelay(ctx) {
+  if (await relayAlive()) {
+    ctx.logger?.info?.('dsh-wx-bridge: 中继本来就在跑')
+    return
+  }
+  startRelay(ctx)
+}
+
+/** 把一句话推到微信。中继会把没发出去的排队，掉线也不丢。 */
 export async function pushToWechat(payload) {
   const r = await fetch(BRIDGE + '/push', {
     method: 'POST',
@@ -81,8 +91,16 @@ export async function wechatLoginStatus(waitMs = 20000) {
 }
 
 export function apply(ctx) {
-  ctx.logger?.info?.('dsh-wx-bridge: 家里说的话会抄一份到微信')
-  void ensureBridge(ctx)
+  ctx.logger?.info?.('dsh-wx-bridge: 微信那条线归我管了')
+  void ensureRelay(ctx)
+
+  // 保活：中继被系统收掉、或者自己崩了，30 秒内拉回来
+  const timer = setInterval(() => {
+    void relayAlive().then((ok) => {
+      if (!ok) startRelay(ctx)
+    })
+  }, KEEPALIVE_MS)
+  timer.unref?.()
 
   if (!HOME_SESSION) {
     ctx.logger?.warn?.('dsh-wx-bridge: 还没设 WX_HOME_SESSION，镜像不会生效。' +
@@ -102,7 +120,6 @@ export function apply(ctx) {
         .join('')
         .trim()
       if (!text) return
-      // 别把带图/文件的整轮再推一遍，那些走别的路
       void pushToWechat({ text, kind: 'reply', name: WX_NAME, from: 'app' }).catch((e) => {
         ctx.logger?.warn?.('dsh-wx-bridge: 推到微信失败：' + short(e))
       })

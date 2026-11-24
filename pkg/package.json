@@ -1,7 +1,7 @@
 {
   "name": "dsh-wx-bridge",
-  "version": "0.1.0",
-  "description": "把个人微信接到 DSH：你在微信里说的话进到家里，她在家里说的话（连闹钟叫醒时嘟囔的那句）抄一份回到微信。装完自动把中继带起来。",
+  "version": "0.2.0",
+  "description": "把个人微信接到 DSH：一条链接装好，中继和插件都在这一个包里。",
   "license": "MIT",
   "type": "module",
   "main": "./lib/index.js",
@@ -11,6 +11,7 @@
   },
   "files": [
     "lib",
+    "relay",
     "cordis.patch.yml",
     "README.md",
     "LICENSE"
