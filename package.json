@@ -1,5 +1,5 @@
 {
-  "name": "dsh-wechat-bridge",
+  "name": "dsh-wx-bridge",
   "version": "0.1.0",
   "private": false,
   "type": "module",
