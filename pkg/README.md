@@ -80,6 +80,23 @@ curl "http://127.0.0.1:18123/login/status?wait=20000"
         kinds: [reply, busy, reach]
 ```
 
+
+## Windows 上
+
+能不能跑：**能**，不用额外装东西。几点说明：
+
+- 中继是纯 Node 脚本，只绑 `127.0.0.1:18123`，不碰系统服务、不写注册表。
+- 插件拉起中继时带 `windowsHide: true`，不会闪一个黑窗口。
+- 路径全走 `node:path`，`~/.dsh/wx-bridge` 在 Windows 上落到 `C:\Users\<你>\.dsh\wx-bridge`。
+- 数据目录、二维码、队列都在那个目录里；卸载插件不会删数据（登录态还在，重装不用重扫）。
+- 端口被占（比如 18123 已经有人用）就在设置里改「中继端口」，插件会用新端口重新拉。
+- 防火墙只拦外部入站；中继只听本机，所以不需要放行规则。
+- 如果 Node 是通过 nvm / fnm 装的，插件用的是当前这个 DSH 进程的 `process.execPath`，跟着它走，不会找错。
+
+一个已知的差别：Windows 上 `spawn(detached)` 的子进程不会像 Linux 那样彻底脱离父进程组——
+DSH 退出时中继可能跟着走。想让它一直在，用「启动时自动拉起」的开关就够了（下次启动会自己回来），
+或者自己写成计划任务（Task Scheduler）开机跑 `node relay/wx-bridge.mjs`。
+
 ## 许可
 
 MIT，见 `LICENSE`。

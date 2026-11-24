@@ -1,17 +1,17 @@
-// dsh-wx-bridge · DSH 插件
+// dsh-wx-bridge · DSH 插件（宿主半）
 //
-// 两件事：
+// 三件事：
 //   1. 把家里的话抄一份推到微信（中继的 /push）。
-//   2. 中继自己也归它管：DSH 一启动就把它拉起来，之后每 30 秒探一次，
-//      挂了就重拉——不这么做，机器重启一次微信那头就静悄悄地断了。
+//   2. 中继自己也归它管：DSH 一启动就把它拉起来，之后每 30 秒探一次，挂了就重拉。
+//   3. 给设置页开一条 /api/wx-bridge 路由：状态、配置读写、申请二维码。
 //
 // 中继源码就在本包的 relay/ 目录里，不用另装。
 //
-// 设置项在 DSH 的「设置 → 插件 → 配置」里（这一版起才有）。
-// 环境变量仍然认，但优先级低于设置页里填的值。
+// 配置是三处合起来的（后面的盖前面的）：
+//   环境变量 → DSH 设置页里的值 → <中继目录>/config.json（设置页改的就是这个）
 
 import { spawn } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -22,8 +22,6 @@ export const inject = []
 const HERE = dirname(fileURLToPath(import.meta.url))
 const RELAY = join(HERE, '..', 'relay', 'wx-bridge.mjs')
 
-// ── 设置项 ───────────────────────────────────────────────────
-// 没装 schemastery 也能跑：这时 Config 是 undefined，插件只读环境变量。
 let Schema = null
 try {
   Schema = (await import('@deepseek-ai/schemastery')).default
@@ -59,7 +57,7 @@ export const Config = Schema
   })
   : undefined
 
-// 运行时配置：apply 时填，导出的那几个函数共用
+// 运行时配置
 const rt = {
   bridgeUrl: 'http://127.0.0.1:18123',
   wxDir: join(homedir(), '.dsh', 'wx-bridge'),
@@ -69,34 +67,76 @@ const rt = {
   autoStart: true,
 }
 
+const DEFAULTS = {
+  homeSession: '',
+  wxDir: '',
+  bridgeUrl: '',
+  bridgePort: 18123,
+  name: '她',
+  keepaliveMs: 30000,
+  autoStart: true,
+}
+
+function configPath() {
+  return join(rt.wxDir, 'config.json')
+}
+
+function readFileConfig() {
+  try {
+    const p = configPath()
+    if (!existsSync(p)) return {}
+    return JSON.parse(readFileSync(p, 'utf8')) || {}
+  } catch {
+    return {}
+  }
+}
+
+function writeFileConfig(patch) {
+  mkdirSync(rt.wxDir, { recursive: true })
+  const cur = readFileConfig()
+  const next = { ...cur, ...patch }
+  writeFileSync(configPath(), JSON.stringify(next, null, 2), 'utf8')
+  return next
+}
+
+function applyConfig(c, env) {
+  const e = env || process.env
+  rt.homeSession = String(c.homeSession || e.WX_HOME_SESSION || '').trim()
+  rt.wxDir = String(c.wxDir || e.WX_BRIDGE_DIR || '').trim() || join(homedir(), '.dsh', 'wx-bridge')
+  const port = Number(c.bridgePort || e.WX_BRIDGE_PORT || 18123)
+  rt.bridgeUrl = String(c.bridgeUrl || e.WX_BRIDGE_URL || '').trim() || `http://127.0.0.1:${port}`
+  rt.name = String(c.name || e.WX_NAME || '她')
+  rt.keepaliveMs = Number(c.keepaliveMs || e.WX_KEEPALIVE_MS || 30000)
+  rt.autoStart = c.autoStart !== false
+}
+
 function short(e) {
   return String((e && e.message) || e || '').slice(0, 120)
 }
 
-async function relayAlive(timeout = 2500) {
+// ── 中继 ────────────────────────────────────────────────────
+async function relayHealth(timeout = 2500) {
   try {
     const r = await fetch(rt.bridgeUrl + '/health', { signal: AbortSignal.timeout(timeout) })
-    return r.ok
+    if (!r.ok) return null
+    return await r.json()
   } catch {
-    return false
+    return null
   }
 }
 
-/** 中继没在跑就拉起来（不覆盖用户自己起的那个）。 */
 function startRelay(ctx) {
   if (!existsSync(RELAY)) {
     ctx.logger?.warn?.(`dsh-wx-bridge: 包里没找到中继（${RELAY}）`)
     return
   }
   try {
+    const port = new URL(rt.bridgeUrl).port || '18123'
     const child = spawn(process.execPath, [RELAY], {
       detached: true,
       stdio: 'ignore',
-      env: {
-        ...process.env,
-        WX_BRIDGE_DIR: rt.wxDir,
-        WX_BRIDGE_PORT: String(new URL(rt.bridgeUrl).port || 18123),
-      },
+      windowsHide: true, // Windows 上别弹黑窗
+      env: { ...process.env, WX_BRIDGE_DIR: rt.wxDir, WX_BRIDGE_PORT: String(port) },
     })
     child.unref()
     ctx.logger?.info?.(`dsh-wx-bridge: 中继没在跑，拉起来了（pid ${child.pid}），数据在 ${rt.wxDir}`)
@@ -106,65 +146,134 @@ function startRelay(ctx) {
 }
 
 async function ensureRelay(ctx) {
-  if (await relayAlive()) {
+  if (await relayHealth()) {
     ctx.logger?.info?.('dsh-wx-bridge: 中继本来就在跑')
     return
   }
   startRelay(ctx)
 }
 
-/** 把一句话推到微信。中继会把没发出去的排队，掉线也不丢。 */
-export async function pushToWechat(payload) {
-  const r = await fetch(rt.bridgeUrl + '/push', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(20000),
+// ── 给设置页用的 HTTP 路由 ───────────────────────────────────
+function registerRoute(ctx) {
+  let web
+  try {
+    web = ctx.get ? ctx.get('webServer') : undefined
+  } catch {}
+  web = web || ctx.webServer
+  if (!web || typeof web.register !== 'function') {
+    ctx.logger?.warn?.('dsh-wx-bridge: 这个宿主没有 webServer，设置页那半开不了（镜像照常工作）')
+    return
+  }
+
+  const json = (res, code, obj) => {
+    res.statusCode = code
+    res.setHeader('Content-Type', 'application/json; charset=utf-8')
+    res.end(JSON.stringify(obj))
+  }
+
+  const dispose = web.register({
+    kind: 'prefix',
+    path: '/api/wx-bridge',
+    handler: async (req, res) => {
+      try {
+        const url = new URL(req.url, 'http://127.0.0.1')
+        const p = url.pathname
+
+        if (req.method === 'GET' && p === '/api/wx-bridge/status') {
+          const h = await relayHealth()
+          return json(res, 200, {
+            ok: true,
+            relay: h ? { alive: true, port: h.port, home: h.home } : { alive: false },
+            wechat: h ? h.wechat : null,
+            config: { ...rt, configFile: configPath() },
+          })
+        }
+
+        if (req.method === 'GET' && p === '/api/wx-bridge/config') {
+          return json(res, 200, { ok: true, config: { ...rt }, defaults: DEFAULTS, configFile: configPath() })
+        }
+
+        if (req.method === 'POST' && p === '/api/wx-bridge/config') {
+          const body = JSON.parse((await readBody(req)) || '{}')
+          const saved = writeFileConfig(body)
+          applyConfig({ ...DEFAULTS, ...readFileConfig(), ...saved }, process.env)
+          if (rt.autoStart) void ensureRelay(ctx)
+          return json(res, 200, { ok: true, config: { ...rt } })
+        }
+
+        // 申请二维码：直接跟中继要，图转成 data URI 给浏览器画
+        if (req.method === 'POST' && p === '/api/wx-bridge/login') {
+          const r = await fetch(rt.bridgeUrl + '/login', { method: 'POST', signal: AbortSignal.timeout(25000) })
+          const j = await r.json()
+          if (!j.imagePath || !existsSync(j.imagePath)) {
+            return json(res, 200, { ok: false, why: '二维码出来了，但图没存下来' })
+          }
+          const b64 = readFileSync(j.imagePath).toString('base64')
+          return json(res, 200, { ok: true, qr: 'data:image/png;base64,' + b64 })
+        }
+
+        if (req.method === 'GET' && p === '/api/wx-bridge/login/status') {
+          const wait = Number(url.searchParams.get('wait') || 3000)
+          const r = await fetch(`${rt.bridgeUrl}/login/status?wait=${wait}`, { signal: AbortSignal.timeout(wait + 10000) })
+          const j = await r.json()
+          return json(res, 200, { ok: true, status: j.status, loggedIn: !!j.loggedIn })
+        }
+
+        return json(res, 404, { ok: false, why: 'no such path' })
+      } catch (e) {
+        return json(res, 500, { ok: false, why: short(e) })
+      }
+    },
   })
-  return await r.json()
+
+  if (typeof ctx.effect === 'function') ctx.effect(() => dispose, 'dsh-wx-bridge: 设置页路由')
 }
 
-/** 要一张登录二维码，返回 { qrcode, link, imagePath }。 */
-export async function wechatLoginQr() {
-  const r = await fetch(rt.bridgeUrl + '/login', { method: 'POST', signal: AbortSignal.timeout(25000) })
-  return await r.json()
-}
-
-/** 问扫上没有：wait / scanned / confirmed / expired。 */
-export async function wechatLoginStatus(waitMs = 20000) {
-  const r = await fetch(`${rt.bridgeUrl}/login/status?wait=${waitMs}`, {
-    signal: AbortSignal.timeout(waitMs + 10000),
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = []
+    let size = 0
+    req.on('data', (c) => {
+      size += c.length
+      if (size > 1024 * 1024) {
+        reject(new Error('body 太大'))
+        req.destroy()
+        return
+      }
+      chunks.push(c)
+    })
+    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')))
+    req.on('error', reject)
   })
-  return await r.json()
 }
 
+// ── 插件本体 ────────────────────────────────────────────────
 export function apply(ctx, config) {
-  const c = config || {}
-  const env = process.env
-
-  rt.homeSession = String(c.homeSession || env.WX_HOME_SESSION || '').trim()
-  rt.wxDir = String(c.wxDir || env.WX_BRIDGE_DIR || '').trim() || join(homedir(), '.dsh', 'wx-bridge')
-  const port = Number(c.bridgePort || env.WX_BRIDGE_PORT || 18123)
-  rt.bridgeUrl = String(c.bridgeUrl || env.WX_BRIDGE_URL || '').trim() || `http://127.0.0.1:${port}`
-  rt.name = String(c.name || env.WX_NAME || '她')
-  rt.keepaliveMs = Number(c.keepaliveMs || env.WX_KEEPALIVE_MS || 30000)
-  rt.autoStart = c.autoStart !== false
+  const fileCfg = { ...DEFAULTS, ...readFileConfig() }
+  const loaderCfg = config || {}
+  // 设置页的值只覆盖「config.json 里没写」的那几项
+  const merged = { ...DEFAULTS }
+  for (const k of Object.keys(DEFAULTS)) {
+    if (loaderCfg[k] !== undefined && loaderCfg[k] !== '' && loaderCfg[k] !== null) merged[k] = loaderCfg[k]
+    if (fileCfg[k] !== undefined && fileCfg[k] !== '' && fileCfg[k] !== null) merged[k] = fileCfg[k]
+  }
+  applyConfig(merged, process.env)
 
   ctx.logger?.info?.(`dsh-wx-bridge: 微信那条线归我管了（中继 ${rt.bridgeUrl}，数据 ${rt.wxDir}）`)
 
   if (rt.autoStart) void ensureRelay(ctx)
 
-  // 保活：中继被系统收掉、或者自己崩了，一会儿就拉回来
+  registerRoute(ctx)
+
   const timer = setInterval(() => {
-    void relayAlive().then((ok) => {
-      if (!ok) startRelay(ctx)
+    void relayHealth().then((h) => {
+      if (!h) startRelay(ctx)
     })
   }, rt.keepaliveMs)
   timer.unref?.()
 
   if (!rt.homeSession) {
-    ctx.logger?.warn?.('dsh-wx-bridge: 还没设「你和她聊天的会话」，镜像不会生效。' +
-      '在 设置 → 插件 → 配置 里填会话 id 里的一段（session-xxxxxxxx-… 里那串）。')
+    ctx.logger?.warn?.('dsh-wx-bridge: 还没设「你和她聊天的会话」，镜像不会生效。在设置里填会话 id 里的一段。')
   }
 
   ctx.on('session/event', (session, event) => {
@@ -187,4 +296,14 @@ export function apply(ctx, config) {
       ctx.logger?.warn?.('dsh-wx-bridge: 镜像出错：' + short(e))
     }
   })
+}
+
+export async function pushToWechat(payload) {
+  const r = await fetch(rt.bridgeUrl + '/push', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(20000),
+  })
+  return await r.json()
 }
