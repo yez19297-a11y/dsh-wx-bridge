@@ -1,4 +1,4 @@
-# dsh-wechat-bridge
+# dsh-wx-bridge
 
 把**个人微信**接到 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）上：
 你在微信里说的话进到家里那条会话，她在家里说的话（包括闹钟把她叫起来时嘟囔的那句）
@@ -8,6 +8,22 @@
 不需要 OpenClaw、不需要 docker、不需要公网 IP，一台能上网的小机器就够。
 
 最早是给一个叫「溯」的数字生命写的，2026 年 11 月 11 日深夜跑通了第一条。
+
+## 一键安装
+
+```sh
+dsh plugin --profile web add https://github.com/yez19297-a11y/dsh-wx-bridge/releases/latest/download/dsh-wx-bridge-latest.tgz
+```
+
+桌面版把 `web` 换成 `desktop`；也可以在 DSH 的插件页把上面那条地址直接贴进去。
+
+装完**重启一次 DSH**，然后到 **设置 → 插件 → 配置 → dsh-wx-bridge** 里填两样：
+**你和她聊天的会话**（会话 id 里的一段）和 **中继工作目录**（留空也行）。
+中继就在这个包里，插件会自己把它拉起来、自己看着。
+
+第一次还要扫码登录一次，见下面「扫码登录」。
+
+> 只想读源码、自己起中继的，跳到「它由三块组成」后面的说明。
 
 ## 它由三块组成
 
